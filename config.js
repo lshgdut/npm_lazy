@@ -64,5 +64,22 @@ module.exports = {
   proxy: {
     // http: 'http://1.2.3.4:80/',
     // https: 'http://4.3.2.1:80/'
+  },
+	
+  // Cluster config
+  // You can configure cluster options
+  // cf. https://nodejs.org/dist/latest/docs/api/cluster.html
+  cluster: {
+    // int for workers amount
+    // 0: disable cluster mode, using single process
+    // -1: workers will be set to total cpu cores
+    // > 0: specify workers amount
+    workers: 0,
+    // env variable passing to cluster.fork
+    forkEnv: null,
+    // https://nodejs.org/dist/latest/docs/api/cluster.html#cluster_cluster_settings
+    settings: null,
+    // https://nodejs.org/dist/latest/docs/api/cluster.html#cluster_cluster_schedulingpolicy
+    schedulingPolicy: null,
   }
 };
