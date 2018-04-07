@@ -1,16 +1,31 @@
-var http = require('http'),
-    path = require('path'),
-    fs = require('fs'),
-    url = require('url'),
-    log = require('minilog')('app'),
+const http = require('http'),
+      path = require('path'),
+      fs = require('fs'),
+      url = require('url'),
+      cluster = require("cluster"),
+      log = require('minilog')('app'),
 
-    api = require('./lib/api.js'),
-    Cache = require('./lib/cache.js'),
-    Package = require('./lib/package.js'),
-    Resource = require('./lib/resource.js');
+      api = require('./lib/api.js'),
+      Cache = require('./lib/cache.js'),
+      Package = require('./lib/package.js'),
+      Resource = require('./lib/resource.js');
+
+function launch(config) {
+  let server = http.createServer();
+
+  server.on('request', function(req, res) {
+    if (config.loggingOpts.logRequesterIP) {
+      log.info("Request from ip: "+req.connection.remoteAddress+ " for "+req.url);
+    }
+    if (!api.route(req, res)) {
+      log.error('No route found', req.url);
+      Package.proxy(req, res);
+    }
+  }).listen(config.port, config.host);
+}
 
 function start(config) {
-  var minilog = require('minilog');
+  let minilog = require('minilog');
 
   if (config.loggingOpts.logToConsole) {
     minilog.enable();
@@ -64,29 +79,45 @@ function start(config) {
   Package.configure(packageConfig);
   api.configure(packageConfig);
 
-  var server = http.createServer();
+  // fire in the hole
+  let enableCluster = config.cluster && config.cluster.workers !== 0
 
-  server.on('request', function(req, res) {
-    if (config.loggingOpts.logRequesterIP) {
-      log.info("Request from ip: "+req.connection.remoteAddress+ " for "+req.url);
+  if (!enableCluster || !cluster.isMaster) {
+    log.info(`Server worker ${process.pid} started`);
+    launch(config)
+  } else {
+    log.info(`Master ${process.pid} is running`);
+
+    // setup cluster master settings
+    if (config.cluster.settings) {
+      cluster.setupMaster(config.cluster.settings)
     }
-    if (!api.route(req, res)) {
-      log.error('No route found', req.url);
-      Package.proxy(req, res);
+
+    // setup schedulingPolicy
+    if (config.cluster.schedulingPolicy) {
+      cluster.schedulingPolicy = config.cluster.schedulingPolicy
     }
-  }).listen(config.port, config.host);
 
-  log.info('npm_lazy at', config.host, 'port', config.port);
-  log.info('npm_lazy cache directory:', path.normalize(config.cacheDirectory));
-
-  // log the proxy config
-  Object.keys(config.proxy).forEach(function(proto) {
-    var conf = config.proxy[proto];
-    if (conf) {
-      log.info('Using ' + conf.protocol + '//' + conf.hostname + ':' + conf.port + ' to proxy ' + proto + ' requests.');
+    // setup workers
+    let workers = config.cluster.workers
+    workers = workers > 0 ? workers : require('os').cpus().length
+    while (workers--) {
+      cluster.fork(config.cluster.forkEnv || process.env)
     }
-  });
+  }
 
+  if (!enableCluster || cluster.isMaster) {
+    log.info('npm_lazy at', config.host, 'port', config.port);
+    log.info('npm_lazy cache directory:', path.normalize(config.cacheDirectory));
+
+    // log the proxy config
+    Object.keys(config.proxy).forEach(function(proto) {
+      var conf = config.proxy[proto];
+      if (conf) {
+        log.info('Using ' + conf.protocol + '//' + conf.hostname + ':' + conf.port + ' to proxy ' + proto + ' requests.');
+      }
+    });
+  }
   /*
   Resource.get('http://www.lagado.com/proxy-test')._fetchTask(function(err, res) {
     if(res) {
